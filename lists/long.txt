@@ -1,0 +1,20 @@
+Plains  [leb]  290
+Plains  [chk]  290
+Plains  [SHM]  283
+Plains  [SHM]  285
+Plains  [SHM]  282
+Plains  [ONS]  331
+Plains  [ONS]  332
+Plains  [avr]  230
+Plains  [avr]  232
+Plains  [ths]  230
+Plains  [por]  196s
+not-a-card  [c13]
+Plainz  [c13]  339
+Plains  [c13]  338
+Plains  [c13]  339
+not-a-set   [x9000]
+[andrew]
+Plains  [c13]  337
+Felidar Cub  [bfz]  25
+plains  [ptk]  166

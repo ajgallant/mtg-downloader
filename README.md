@@ -1,22 +1,18 @@
-# MTG Set Scryfall Downloader
+# MTG Scryfall Downloader
 
-This repository contains two Python scripts that allow you to download Magic: The Gathering card images from the Scryfall API using a specific set code. Additionally, it includes a script to generate a `.HTML` file for Binder.
+The MTG Scryfall Downloader will download sets of Magic: The Gathering card images from Scryfall. Image filenames are compatible with the MTG game Forge for Mac OS and Linux.  Additionally, it includes a script to generate a `.HTML` file for Binder.
 
 ## Scripts
 
-- `MTG_Set_ScryfallDownloader.py`: This script enables you to download card images for a specific Magic: The Gathering set from the Scryfall API. It prompts the user to enter the set code and SSL verification preference, then proceeds to download the card images into the `art` directory within the repository. The script relies on the Scryfall API for accessing card data.
-   - This script allows you also to download card images from a list of cards specified in a text file. It reads the card names, set codes, and card numbers from the file and retrieves the corresponding card data and images from the Scryfall API. The downloaded images are saved in the `art/CardsList` directory.
+- `downloader.py`: This script enables you to download card images for a specific Magic: The Gathering set from Scryfall using the Scryfall API. It prompts the user to enter the set code, then proceeds to download the card images into the `art` directory. The script relies on the Scryfall API to discover cards and `scryfall.io` for card images.<p>
+This script also allows you to download card images from a list of cards specified in a text file. It reads the card names, set codes, and card numbers from the file and retrieves the corresponding card data and images from Scryfall. The downloaded images are saved in the `art` directory.
 
 - `Binder_Generator.py`: Generates an `.HTML` page that represents a card binder for the Magic: The Gathering cards downloaded using the MTG Set Scryfall Downloader script. The generated HTML file, named `binder.html`, provides a visual representation of the downloaded cards, organized in a grid-like format. It includes interactive features such as image previews, pagination, and navigation buttons to browse through the card collection.
 
 ## Prerequisites
 
-Before using the scripts, make sure you have Python (version 3.x) installed on your system. Also, ensure that you have the following Python packages installed:
-
-- `requests`
-- `ijson`
-
-These packages can be installed using the Python package manager, pip:
+Before using the scripts, make sure you have Python (version 3.8+) installed on your system.<p>
+Install the package dependencies using the Python package manager, pip:
 
 ```shell
 pip install -r requirements.txt
@@ -27,49 +23,49 @@ pip install -r requirements.txt
 1. Clone the repository to your local machine:
 
    ```shell
-   git clone https://github.com/Wookappa/mtg-set-dowloader-binder.git
+   git clone https://github.com/ajgallant/mtg-downloader.git
    ```
 
 2. Navigate to the repository directory:
 
    ```shell
-   cd mtg-set-dowloader-binder
+   cd mtg-downloader
    ```
 
 3. Run the desired script:
 
-   - For downloading card images:
+   - For downloading card images, start the downloader script:
 
      ```shell
-     python MTG_Set_ScryfallDownloader.py
+     downloader.py
      ```
-      This will start the script and prompt you to select the desired option:
-      - To download card images from a specific set:
-        - Enter `1` and follow the prompts to enter the set code and SSL verification preference.
+     Select the desired option:
+     1. Download card images from a specific set by entering the set code at the prompt.
    
-      - To download card images from a list of cards:
-        - Enter `2` and provide the path to the text file (`cards.txt`) containing the list of cards. The file should have each card on a separate line, and each line should contain the card name, set code, and card number separated by spaces.
-        - The "cards.txt" file should contain the list of desired cards, with one card per line. Each line of the file should be formatted as follows:
-
+     2. Download card images from a list of cards by providing the path to the text file containing the list at the prompt. Each line of the file selects a group of cards to be downloaded. It should be formatted as follows:
 
             ```
-            CardName (SetCode) (CardNumber)
+            CardName [SetCode] CardNumber
             ```
             
-            - `CardName` represents the name of the card, without any additional spaces.
-            - `SetCode` (Optional) represents the set code of the card, enclosed in parentheses.
-            - `CardNumber` (Optional) represents the card number within the set.
+            - `CardName` the name of the card, without any additional spaces.
+            - `SetCode` the set code, enclosed in brackets.
+            - `CardNumber` the card number within the set.
             
-            For example, here's an example of how the "cards.txt" file could be structured:
+            For example, the "cards.txt" file could be structured:
             
             ```
-            Black Lotus (UNL) 1
-            Force of Will (ALL) 49
-            Brainstorm (MMQ) 40
+            # Cards for the Competition 2022 deck
+            Black Lotus   [UNL]   1
+            Force of Will [ALL]
+            Brainstorm
+            [iko]
+            [ALL] 17
             ```
          
-         Make sure each card is on a separate line and that the information is separated by spaces. This format allows the `MTG_Set_ScryfallDownloader.py` script to correctly read the card information and download the corresponding images.
-      The script will then proceed with the selected option and download the card images into the `art` directory.
+         Make sure each selection is on a separate line and that each field is separated by spaces.  If Scryfall finds no cards which match a line in the list, then it will print a warning and continue downloading cards in the list.
+     
+     Upon conclusion of the download, the card images may be found in the `art` directory.
 
    - For generating Binder:
 
@@ -90,16 +86,10 @@ pip install -r requirements.txt
         
         The generated HTML page provides an interactive and visually appealing way to browse through your downloaded card collection. It allows you to view card images, navigate between pages, and explore the cards within the binder.
         
-        Please note that the `Binder_Generator.py` script should be executed after running the `MTG_Set_ScryfallDownloader.py` script to download the card images. Ensure that the downloaded card images are present in the designated art directory before running `Binder_Generator.py`.
-        
-        For more details on the MTG Set Scryfall Downloader script and its usage, refer to the MTG Set Scryfall Downloader section in the README.
+        Please note that the `Binder_Generator.py` script should be executed after running the `downloader.py` script to download the card images. Ensure that the downloaded card images are present in the designated art directory before running `Binder_Generator.py`.
 
 ## Note
 
 - Make sure to comply with the terms of use of the Scryfall API and the API usage policies when using the scripts.
 - The proper functioning of the scripts relies on the availability of the Scryfall API. Ensure that the API is accessible and operational before running the scripts.
 - These scripts are provided "as is" without any warranty. The author assumes no responsibility for any damages arising from the use of these scripts.
-
-## License
-
-This project is licensed under the [MIT License](https://opensource.org/licenses/MIT).
