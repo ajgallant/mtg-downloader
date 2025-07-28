@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# $Id: downloader.py 295 2025-07-28 13:39:23Z drew $
+# $Id: downloader.py 296 2025-07-28 23:10:38Z drew $
 
 ###
 #
@@ -42,7 +42,7 @@ import urllib.request
 from ratelimit import limits, sleep_and_retry
 # ratelimit sleep_and_retry is best used by a single thread.  conditions and
 # semaphores could be used to ensure each thread calls the decorated function
-# in-turn.
+# in turn.
 
 # Disable SSL verification warning
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -156,13 +156,25 @@ def get_all_cards_url(verify_ssl):
     return content['data'][3]['download_uri']
 
 #
-# get_card_data_and_download(query)
+# get_card_data_and_download(query_parts)
 # collect card data from the Scryfall API and download the card image
+#
+# query_parts is a dict(parameter -> value) or a string
+#  "name:Mountain set:inv"
+#  {"name": "Mountain", "set": "inv"}
 #
 # apply a rate limit to this function as it may be called frequently
 @sleep_and_retry
 @limits(calls=12, period=1)  # limit to 12 calls per second
-def get_card_data_and_download(query):
+def get_card_data_and_download(query_parts):
+    if not isinstance(query_parts, str):
+        # query_parts is a dict
+        query = ' '.join(f'{key}:{val}' for key, val in query_parts.items())
+    else:
+        # query_parts is a string
+        query = query_parts.strip()
+        # query_parts = None, query_dict = ...
+    
     params = {
         "q": query,
         "unique": "prints",  # select multiple prints of a card
@@ -296,8 +308,7 @@ def download_cards_list(list_name):
 
         if not set_code_match:
             # only a card name, no set code
-            card_name = entry
-            query = f'name:"{card_name}"'
+            parameters = {'name': entry}
         else:
             # include set code and optionals in query
             parameters = {'set': set_code_match[2]}
@@ -309,9 +320,8 @@ def download_cards_list(list_name):
             # ignore invalid card numbers
             if len(card_number) > 0 and card_number.isalnum():
                 parameters['number'] = card_number
-            query = ' '.join(f'{k}:{v}' for k, v in parameters.items())
 
-        saved, not_saved = get_card_data_and_download(query)
+        saved, not_saved = get_card_data_and_download(parameters)
         saved_count += saved
         not_saved_count += not_saved
 
@@ -493,12 +503,13 @@ print("Writing files in", output_dir)
 
 option = None
 # prompt the user to select an option
-while option not in ('1', '2'):
+while option not in ('1', '2', '3'):
     if option is not None:
         print("Invalid option. Please try again.\n")
     option = input("Choose an option:\n\
  1. Download a set\n\
  2. Download cards from a list\n\
+ 3. Download a Scryfall query\n\
 Selection: ")
 
 if option == '1':
@@ -513,6 +524,13 @@ elif option == '2':
     list_name = input("Enter the name of the card list file: ").strip()
     start = datetime.datetime.now()
     (saved, not_saved) = download_cards_list(list_name)
+elif option == '3':
+    # Download a Scryfall query
+    print("Queries are key-value pairs like name:Mountain set:bng")
+    # prompt the user to enter the query
+    query = input("Query: ")
+    start = datetime.datetime.now()
+    (saved, not_saved) = get_card_data_and_download(query)
 else:
     print("Invalid option selected.")
     exit(0)

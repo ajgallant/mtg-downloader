@@ -44,26 +44,26 @@ pip install -r requirements.txt
    
      2. Download card images from a list of cards by providing the path to the text file containing the list at the prompt. Each line of the file selects a group of cards to be downloaded. It should be formatted as follows:
 
-            ```
-            CardName [SetCode] CardNumber
-            ```
-            
-            - `CardName` the name of the card, without any additional spaces.
-            - `SetCode` the set code, enclosed in brackets.
-            - `CardNumber` the card number within the set.
-            
-            For example, the "cards.txt" file could be structured:
-            
-            ```
-            # Cards for the Competition 2022 deck
-            Black Lotus   [UNL]   1
-            Force of Will [ALL]
-            Brainstorm
-            [iko]
-            [ALL] 17
-            ```
-         
-         Make sure each selection is on a separate line and that each field is separated by spaces.  If Scryfall finds no cards which match a line in the list, then it will print a warning and continue downloading cards in the list.
+   	    ```text
+        CardName [SetCode] CardNumber
+	      ```
+		    
+		    - `CardName` the name of the card, without any additional spaces.
+		    - `SetCode` the set code, enclosed in brackets.
+		    - `CardNumber` the card number within the set.
+        
+		    For example, the "cards.txt" file could be structured:
+        
+		    ```text
+		    # Cards for the Competition 2022 deck
+		    Black Lotus   [UNL]   1
+		    Force of Will [ALL]
+		    Brainstorm
+		    [iko]
+		    [ALL] 17
+		    ```
+        
+        Make sure each selection is on a separate line and that each field is separated by spaces.  If Scryfall finds no cards which match a line in the list, then it will print a warning and continue downloading cards in the list.
      
      Upon conclusion of the download, the card images may be found in the `art` directory.
 
