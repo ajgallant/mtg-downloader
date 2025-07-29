@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-# $Id: downloader.py 296 2025-07-28 23:10:38Z drew $
+# $Id: downloader.py 297 2025-07-29 18:11:41Z drew $
 
 ###
 #
-# downloader.py - Magic: The Gathering card downloader
+# downloader.py - Magic: The Gathering card image downloader
 # 
 # Fetch sets of Magic: The Gathering card images from scryfall.com
 #
-# The downloader can fetch all cards from a set, or a list of cards.  The list
-# of cards can be specified in a text file, where each line follows the format:
+# The downloader can fetch all cards from a set, query or a list of cards.  
+# The list of cards can be specified in a text file, where each line follows
+# the format:
 #
 #  <card_name> [<set>] <card number>
 #
@@ -18,7 +19,9 @@
 #  Soldier               Soldiers from all sets
 #  [MOE]                 Card set MOE
 #
-# scryfall API
+# Scryfall search
+#  https://scryfall.com/docs/syntax
+# Scryfall API
 #  https://scryfall.com/docs/api/cards
 #  https://scryfall.com/docs/api/cards/search
 #    set query parameter:    set:eek
@@ -26,7 +29,7 @@
 #
 # git repository
 #  https://github.com/ajgallant/mtg-downloader.git
-# forked repository
+# a fork of
 #  https://github.com/Wookappa/mtg-set-dowloader-binder.git
 #
 ###
@@ -48,13 +51,26 @@ from ratelimit import limits, sleep_and_retry
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 #
+# get_request_limited(*args, **kwargs)
+# a rate limited wrapper of request.get()
+#
+# call this function to limit the rate of requests to the Scryfall API
+#
+@sleep_and_retry
+@limits(calls=12, period=1)  # limit to 12 calls per second
+def get_request_limited(*args, **kwargs):
+    return requests.get(*args, **kwargs)
+
+#
 # get_valid_filename(name)
 # convert string to a valid filename
 #
 def get_valid_filename(name):
     filename = str(name).strip()
+    # Perform substitutions
+    filename = filename.replace(' // ', '-+')
     # Remove any characters that are not alphanumeric or accepted punctuation
-    return re.sub(r'(?u)[^-\w .;,:+\']', '', filename)
+    return re.sub(r'(?u)[^-\w .;,:+\']', '', filename) # (?u) is unicode regex
 
 #
 # get_unique_filename(card)
@@ -119,7 +135,7 @@ def writefile(url, file_path):
     with open(file_path, 'wb') as file:
         if not url:
             return  0 # only truncate file
-        req = requests.get(url, verify=False)
+        req = requests.get(url)
         return  file.write(req.content)
 
 #
@@ -130,9 +146,9 @@ def writefile(url, file_path):
 #
 def check_set_exists(set_code):
     url = f"https://api.scryfall.com/sets/{set_code}"
-    response = requests.get(url)
-
     try:
+        response = get_request_limited(url)
+
         if response.status_code == 200:
             body = response.json()
             return body
@@ -142,31 +158,30 @@ def check_set_exists(set_code):
         return None
 
 #
-# get_all_cards_url(verify_ssl)
+# get_all_cards_url()
 # get the URL for bulk data containing all Magic: The Gathering cards
 #
 # bulk data files may be very large, in excess of 1GB
 #
 # return a download URL for the card JSON
 #
-def get_all_cards_url(verify_ssl):
-    res = requests.get('https://api.scryfall.com/bulk-data', verify=verify_ssl)
+def get_all_cards_url():
+    res = get_request_limited('https://api.scryfall.com/bulk-data')
     content = res.json()
     # response contains URIs for card images, JSON, sets, etc.
     return content['data'][3]['download_uri']
 
 #
-# get_card_data_and_download(query_parts)
+# get_card_data_and_download(query_parts, confirm)
 # collect card data from the Scryfall API and download the card image
 #
 # query_parts is a dict(parameter -> value) or a string
 #  "name:Mountain set:inv"
 #  {"name": "Mountain", "set": "inv"}
+# confirm is a boolean; if True, confirm query results before downloading
 #
 # apply a rate limit to this function as it may be called frequently
-@sleep_and_retry
-@limits(calls=12, period=1)  # limit to 12 calls per second
-def get_card_data_and_download(query_parts):
+def get_card_data_and_download(query_parts, confirm=False):
     if not isinstance(query_parts, str):
         # query_parts is a dict
         query = ' '.join(f'{key}:{val}' for key, val in query_parts.items())
@@ -189,20 +204,37 @@ def get_card_data_and_download(query_parts):
 
         # query results are paginated
         while uri:
-            response = requests.get(uri)
+            response = get_request_limited(uri)
             if response.status_code == 404:
-                not_saved += 1
                 break  # no results found
             if response.status_code != 200:
-                not_saved += 1
                 raise Exception(f"Request to scryfall failed: \
 {response.status_code} {response.reason}")
             
             res = response.json()
-            if not "data" in res:
-                not_saved += 1
-                raise Exception(f"Response missing 'data' property: {res}")
+            if res['total_cards'] == 0:
+                return 0, 0  # no cards found
             
+            if confirm and saved + not_saved == 0:
+                # confirm the first 10 cards before downloading
+                item = 0
+                if res['total_cards'] == 1:
+                    print('1 card found')
+                else:
+                    print('{count} cards found'.format(count=res['total_cards']))
+                # print up to 10 cards
+                for card in res["data"]:
+                    if item >= 10:
+                        print(' ...')
+                        break
+                    print(' {set_name}:{name}'.format(set_name=card['set_name'],
+                                                      name=card['name']))
+                    item += 1
+                reply = input('Is this correct? ').strip()
+                if reply in ('n', 'N', 'no', 'NO'):
+                    not_saved += res['total_cards']
+                    break
+
             for card in res["data"]:
                 # save the card image
                 # no additional rate limits are required.  save_card_image()
@@ -290,8 +322,15 @@ def save_card_image(card):
 #  [MOE]                Card set MOE
 #
 def download_cards_list(list_name):
-    with open(list_name, "r") as file:
-        card_list = file.readlines()  # Read the list of cards from a file
+    try:
+        with open(list_name, "r") as file:
+            card_list = file.readlines()  # Read the list of cards from a file
+    except FileNotFoundError:
+        print(f"File not found: {list_name}")
+        return 0, 0
+    except Exception as e:
+        print(f"Error reading file {list_name}: {str(e)}")
+        return 0, 0
 
     saved_count = 0
     not_saved_count = 0
@@ -325,11 +364,12 @@ def download_cards_list(list_name):
         saved_count += saved
         not_saved_count += not_saved
 
-        if saved == 0 and not_saved == 0:
-            print("No cards match:", entry)
-        elif not_saved > 0:
-            print("Failed to download {count} cards for: {entry}".format(\
-                count=not_saved, entry=entry))
+        if saved == 0:
+            if not_saved == 0:
+                print("No cards match:", entry)
+                not_saved_count += 1
+            else: # not_saved > 0:
+                print("Failed to download cards for:", entry)
 
     return  saved_count, not_saved_count
 
@@ -486,58 +526,58 @@ def unit_test():
         print("Test 4 passed")
     print("Unit test complete")
 
+# begin main script
+if __name__ == "__main__":
+    # optionally run unit tests
+    testing = False
+    if testing:
+        unit_test()
+        exit(0)  # Exit after running unit tests
 
-if __name__ != "__main__":
-    exit(0)
+    output_dir = os.path.join(os.getcwd(), "art") # write card images to output_dir
+    os.makedirs(output_dir, exist_ok=True)
+    print("Writing files in", output_dir, '\n')
 
-# optionally run unit tests
-testing = False
-if testing:
-    unit_test()
-    exit(0)  # Exit after running unit tests
+    option = None
+    # prompt the user to select an option
+    while option not in ('1', '2', '3'):
+        if option is not None:
+            print("Invalid option. Please try again.\n")
+        option = input("Choose a download method:\n\
+ 1. Set of cards\n\
+ 2. List of cards\n\
+ 3. Scryfall query\n\
+Select: ")
 
-# main script
-output_dir = os.path.join(os.getcwd(), "art") # write card images to output_dir
-os.makedirs(output_dir, exist_ok=True)
-print("Writing files in", output_dir)
+    print() # '\n'
+    if option == '1':
+        # Download a set
+        # prompt the user to enter the set code
+        set_code = input("Enter the set code (e.g., 'inv'): ")
+        start = datetime.datetime.now()
+        (saved, not_saved) = download_set(set_code)
+    elif option == '2':
+        # Download cards from a list
+        # prompt the user to enter the name of the card list
+        list_name = input("Enter the name of the card list file: ").strip()
+        start = datetime.datetime.now()
+        (saved, not_saved) = download_cards_list(list_name)
+    elif option == '3':
+        # Download a Scryfall query
+        print("Queries are key-value pairs like name:Mountain set:bng")
+        # prompt the user to enter the query
+        query = input("Query: ")
+        start = datetime.datetime.now()
+        (saved, not_saved) = get_card_data_and_download(query, confirm=True)
+        if saved == 0 and not_saved == 0:
+            print("No cards found")
+    else:
+        print("Invalid option selected.")
+        exit(0)
 
-option = None
-# prompt the user to select an option
-while option not in ('1', '2', '3'):
-    if option is not None:
-        print("Invalid option. Please try again.\n")
-    option = input("Choose an option:\n\
- 1. Download a set\n\
- 2. Download cards from a list\n\
- 3. Download a Scryfall query\n\
-Selection: ")
+    end = datetime.datetime.now()
+    print(f"\nTotal cards saved:     {saved}")
+    print(f"Total cards not saved: {not_saved}")
 
-if option == '1':
-    # Download a set
-    # prompt the user to enter the set code
-    set_code = input("Enter the set code (e.g., 'inv'): ")
-    start = datetime.datetime.now()
-    (saved, not_saved) = download_set(set_code)
-elif option == '2':
-    # Download cards from a list
-    # prompt the user to enter the name of the card list
-    list_name = input("Enter the name of the card list file: ").strip()
-    start = datetime.datetime.now()
-    (saved, not_saved) = download_cards_list(list_name)
-elif option == '3':
-    # Download a Scryfall query
-    print("Queries are key-value pairs like name:Mountain set:bng")
-    # prompt the user to enter the query
-    query = input("Query: ")
-    start = datetime.datetime.now()
-    (saved, not_saved) = get_card_data_and_download(query)
-else:
-    print("Invalid option selected.")
-    exit(0)
-
-end = datetime.datetime.now()
-print(f"\nTotal cards saved:     {saved}")
-print(f"Total cards not saved: {not_saved}")
-
-elapsed_time = end - start  # Calculate the elapsed time
-print("Elapsed time:", elapsed_time)
+    elapsed_time = end - start  # Calculate the elapsed time
+    print("Elapsed time:", elapsed_time)
