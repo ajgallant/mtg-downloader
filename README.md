@@ -48,12 +48,13 @@ Before using the scripts, make sure you have [Python](https://www.python.org/dow
 		
  	``CardName [SetCode] CardNumber``
 	
-	<p>
+	 <p>
 	 - *CardName* the name of the card, without any additional spaces.
 	 - *SetCode* the set code, enclosed in brackets.
 	 - *CardNumber* the card number within the set.
-    </p>
+
     For example, the "cards.txt" file could be structured:
+    </p>
 	
 	 ```
 	 # Cards for the Competition 2022 deck
@@ -62,7 +63,7 @@ Before using the scripts, make sure you have [Python](https://www.python.org/dow
     Brainstorm
     [iko]
     [ALL] 17
-    ```
+     ```
 
    <p>
    	Make sure each selection is on a separate line and that each field is separated by spaces.  If Scryfall finds no cards which match a line in the list, then it will print a warning and continue downloading cards in the list.
@@ -89,7 +90,13 @@ Before using the scripts, make sure you have [Python](https://www.python.org/dow
     
     The generated HTML page provides an interactive and visually appealing way to browse through your downloaded card collection. It allows you to view card images, navigate between pages, and explore the cards within the binder.
     
-    Please note that the `Binder_Generator.py` script should be executed after running the `downloader.py` script to download the card images. Ensure that the downloaded card images are present in the designated art directory before running `Binder_Generator.py`.
+    Please note that the `Binder_Generator.py` should be executed after running the `downloader.py` to download the card images. Ensure that the downloaded card images are present in the designated ``art`` directory before running `Binder_Generator.py`.
+
+## Future Enhancements
+
+- Select the image size and quality from the small, normal, and large image URIs.
+- Asynchronous transfer of images and search results.
+- Short or long set name may be used for the card image directory name.
 
 ## Note
 

@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
-# $Id: downloader.py 297 2025-07-29 18:11:41Z drew $
+# $Id: downloader.py 298 2025-08-01 01:21:47Z drew $
+#
+# git repository
+#  https://github.com/ajgallant/mtg-downloader.git
+# a fork of
+#  https://github.com/Wookappa/mtg-set-dowloader-binder.git
+# images compatible with
+#  https://github.com/Card-Forge/forge.git
 
 ###
 #
-# downloader.py - Magic: The Gathering card image downloader
+# downloader.py
+#
+description = "Magic: The Gathering card image downloader"
 # 
 # Fetch sets of Magic: The Gathering card images from scryfall.com
+# Image filenames are compatible with the Forge rules engine, a MTG player.
 #
 # The downloader can fetch all cards from a set, query or a list of cards.  
 # The list of cards can be specified in a text file, where each line follows
@@ -27,10 +37,16 @@
 #    set query parameter:    set:eek
 #    token query parameter:  is:token
 #
-# git repository
-#  https://github.com/ajgallant/mtg-downloader.git
-# a fork of
-#  https://github.com/Wookappa/mtg-set-dowloader-binder.git
+import argparse
+arg_parser = argparse.ArgumentParser(description=description, 
+    formatter_class=argparse.RawTextHelpFormatter)
+arg_parser.add_argument('-s', '--set-names', action='store_true',
+    help="""Use set names for card directories\nEx: Ravnicar/Plains.jpg
+""")
+arg_parser.add_argument('-o', '--output-directory', action='store',
+    dest='output_directory', metavar='dir', default='art', 
+    help='Directory to store card images')
+#arg_parser.add_argument('-h', '--help', action='help')
 #
 ###
 
@@ -38,10 +54,13 @@ import os
 import re
 import datetime
 import json
+from functools import lru_cache
 #import ijson
 import requests
 import urllib3
 import urllib.request
+import PIL
+from PIL import Image
 from ratelimit import limits, sleep_and_retry
 # ratelimit sleep_and_retry is best used by a single thread.  conditions and
 # semaphores could be used to ensure each thread calls the decorated function
@@ -62,46 +81,53 @@ def get_request_limited(*args, **kwargs):
     return requests.get(*args, **kwargs)
 
 #
-# get_valid_filename(name)
-# convert string to a valid filename
+# makedirs(path, exist_ok)
+# wrapper of os.makedirs() to reduce redundant calls
+#
+@lru_cache(24)
+def makedirs(path, exist_ok=True):
+    return  os.makedirs(path, exist_ok=exist_ok)
+
 #
 def get_valid_filename(name):
+    """Converts a string to a valid filename.
+    
+    Removes characters that are not alphanumeric or in a list of
+    accepted punctuation.
+    """
     filename = str(name).strip()
     # Perform substitutions
-    filename = filename.replace(' // ', '-+')
+    filename = filename.replace(' // ', '')
     # Remove any characters that are not alphanumeric or accepted punctuation
     return re.sub(r'(?u)[^-\w .;,:+\']', '', filename) # (?u) is unicode regex
 
 #
-# get_unique_filename(card)
-# generate a unique filename for the card based on its set name and card name
+# get_key(card, set_name)
+# generate a unique key for the card based on its set name and card name
 #
 # append an optional numeric suffix to the filename if it already exists
 # e.g. "Mountain" -> "Mountain", "Mountain2", "Mountain3",
 #
-def get_unique_filename(card):
-    names = get_unique_filename.names
-
-    if 'image_uris' in card:
-        name = get_valid_filename(card['name'])
-    elif 'type_line' in card and card['type_line'] != 'Card // Card':
-        if 'card_faces' in card: # and len(card['card_faces']) == 2
-            name = get_valid_filename(card['card_faces'][0]['name'])
-    elif 'layout' in card and card['layout'] == 'reversible_card':
-        if 'card_faces' in card: # and len(card['card_faces']) == 2:
-            name = get_valid_filename(card['card_faces'][0]['name'])
-
-    key = "{set_name}/{name}".format(set_name=card['set_name'], name=name)
-    if not key in names:
-        names[key] = 1
+# cards with multiple card_faces may have two card images.  The file naming
+# convention in Forge may be found in:
+#  forge-core/src/main/java/forge/card/CardRules.java : getName()
+#  forge-core/src/main/java/forge/item/PaperCard.java
+#  forge-core/src/main/java/forge/util/ImageUtil.java : getNameToUse()
+#
+def get_key(card, set_name):
+    keys = get_key.keys
+    name = get_valid_filename(card['name'])
+    key = "{set_name}/{name}".format(set_name=set_name, name=name)
+    if not key in keys:
+        keys[key] = 1
         return  name
     # duplicate filename.  append a number to the name
-    names[key] += 1
-    return  "{name}{number}".format(name=name, number=names[key])
+    keys[key] += 1
+    return  "{name}{number}".format(name=name, number=keys[key])
 
 # names : a dictionary of filenames
 #  {filename -> count} 
-get_unique_filename.names = dict()
+get_key.keys = dict()
 
 #
 # rename_file(old_name, new_name[, dir_path])
@@ -125,13 +151,13 @@ def rename_file(old_name, new_name, dir_path=None):
         return  None
 
 #
-# writefile(url, file_path)
+# write_file(url, file_path)
 # download a resource and save it to a file
 #
 # if the file already exists, overwrite it
 # downloads from scryfall.io are not rate limited
 #
-def writefile(url, file_path):
+def write_file(url, file_path):
     with open(file_path, 'wb') as file:
         if not url:
             return  0 # only truncate file
@@ -169,10 +195,11 @@ def get_all_cards_url():
     res = get_request_limited('https://api.scryfall.com/bulk-data')
     content = res.json()
     # response contains URIs for card images, JSON, sets, etc.
+    # confirm *type* of bulk data before downloading
     return content['data'][3]['download_uri']
 
 #
-# get_card_data_and_download(query_parts, confirm)
+# get_card_data_and_download(output_dir, query_parts, confirm, use_set_names)
 # collect card data from the Scryfall API and download the card image
 #
 # query_parts is a dict(parameter -> value) or a string
@@ -181,7 +208,8 @@ def get_all_cards_url():
 # confirm is a boolean; if True, confirm query results before downloading
 #
 # apply a rate limit to this function as it may be called frequently
-def get_card_data_and_download(query_parts, confirm=False):
+def get_card_data_and_download(output_dir, query_parts, confirm=False, 
+                               use_set_names=False):
     if not isinstance(query_parts, str):
         # query_parts is a dict
         query = ' '.join(f'{key}:{val}' for key, val in query_parts.items())
@@ -227,7 +255,10 @@ def get_card_data_and_download(query_parts, confirm=False):
                     if item >= 10:
                         print(' ...')
                         break
-                    print(' {set_name}:{name}'.format(set_name=card['set_name'],
+                    set_name = card['set'].upper()
+                    if use_set_names:
+                        set_name = card['set_name']
+                    print(' {set_name}:{name}'.format(set_name=set_name,
                                                       name=card['name']))
                     item += 1
                 reply = input('Is this correct? ').strip()
@@ -239,7 +270,8 @@ def get_card_data_and_download(query_parts, confirm=False):
                 # save the card image
                 # no additional rate limits are required.  save_card_image()
                 # makes download requests to scryfall.io
-                (stored, not_stored) = save_card_image(card)
+                (stored, not_stored) = save_card_image(output_dir, card, 
+                                                       use_set_names)
                 if stored > 0:
                     saved += stored
                 if not_stored > 0:
@@ -255,53 +287,80 @@ def get_card_data_and_download(query_parts, confirm=False):
     return saved, not_saved
 
 #
-# save_card_image(card)
+# save_card_image(output_dir, card, use_set_names=False)
 # download the card image and store with a unique filename
 #
-def save_card_image(card):
-    set_name = get_valid_filename(card['set_name']) # part of file path
+def save_card_image(output_dir, card, use_set_names=False):
+    set_name = get_valid_filename(card['set'].upper())  # set code
+    if use_set_names:
+        set_name = get_valid_filename(card['set_name'])
     dir_path = os.path.join(output_dir, set_name)
-    os.makedirs(dir_path, exist_ok=True)
+    makedirs(dir_path)
 
     # get a unique filename and rename previous files if necessary
-    def get_filename(card):
-        name = get_unique_filename(card)
-        if len(name) > 1 and name[-1] == '2':
+    def get_filename(card, alt=None):
+        if alt:
+            prev_name = card['name']
+            card['name'] += alt
+        key = get_key(card, set_name)
+        if alt:
+            card['name'] = prev_name
+        # check number at end of key
+        match = re.search(r'[0-9]{1,}$', key)
+        if match and int(match[0]) == 2:
             # rename previous file -> file1
-            original = name[:-1]  # remove the last character, a number
+            original = key[:-1]  # remove the last character, a number
             rename_file("{0}.full.jpg".format(original), 
                 "{base}1.full.jpg".format(base=original), dir_path)
-        return  name
+        return  os.path.join(dir_path, f"{key}.full.jpg")
 
-    #collector_number = get_valid_filename(card['collector_number']) # card num
-    name = get_filename(card)
-    file_path = file_path_front = file_path_rear = None
     saved_count = 0
     not_saved_count = 0
 
-    # join the file path with the card name
-    if 'image_uris' in card:
-        file_path = os.path.join(dir_path, f"{name}.full.jpg")
-    elif 'type_line' in card and card['type_line'] != 'Card // Card':
-        if 'card_faces' in card: # and len(card['card_faces']) == 2:
-            file_path_front = os.path.join(dir_path, f"{name} front.full.jpg")
-            file_path_rear = os.path.join(dir_path, f"{name} rear.full.jpg")
-    elif 'layout' in card and card['layout'] == 'reversible_card':
-        if 'card_faces' in card: # and len(card['card_faces']) == 2:
-            file_path_front = os.path.join(dir_path, f"{name} front.full.jpg")
-            file_path_rear = os.path.join(dir_path, f"{name} rear.full.jpg")
-
-    # download the card image and save it to the file path
-    if file_path is not None:
-        writefile(card['image_uris']['large'], file_path)
+    # download the card image and save it
+    if 'card_faces' in card and len(card['card_faces']) > 0:
+        if 'layout' in card and card['layout'] == 'adventure':
+            # adventure cards have an alternate name: card_faces[0]
+            write_file(card['image_uris']['large'], 
+                      get_filename(card['card_faces'][0]))
+            print(f" saved {set_name}:{card['name']}")
+            saved_count += 1
+        elif 'layout' in card and card['layout'] == 'split':
+            # split cards have an alternate name: face[0] + face[1]
+            write_file(card['image_uris']['large'], 
+get_filename(card['card_faces'][0], card['card_faces'][1]['name']))
+            print(f" saved {set_name}:{card['name']}")
+            saved_count += 1
+        elif 'layout' in card and card['layout'] == 'flip':
+            # flip cards are two images: faces[0], flip(faces[1])
+            file_0 = get_filename(card['card_faces'][0])
+            write_file(card['image_uris']['large'], file_0)
+            image = Image.open(file_0)
+            pixels = image.transpose(Image.Transpose.ROTATE_180)
+            pixels.save(get_filename(card['card_faces'][1]))
+            pixels.close()
+            image.close()
+            print(f" saved {set_name}:{card['name']}")
+            saved_count += 1
+        elif 'layout' in card and card['layout'] == 'reversible_card':
+            # reversibles are not coded in Forge card rules, thus there is no
+            # back loaded for this card.  store the back with -bk postfix.
+            write_file(card['card_faces'][0]['image_uris']['large'],
+                      get_filename(card['card_faces'][0]))
+            write_file(card['card_faces'][1]['image_uris']['large'],
+                      get_filename(card['card_faces'][1], "-bk"))
+            print(f" saved {set_name}:{card['name']}")
+            saved_count += 1
+        else:
+            # transform layout cards have two card images
+            for card_face in card['card_faces']:
+                write_file(card_face['image_uris']['large'], 
+                          get_filename(card_face))
+            print(f" saved {set_name}:{card['name']}")
+            saved_count += 1
+    elif 'image_uris' in card:
+        write_file(card['image_uris']['large'], get_filename(card))
         print(f" saved {set_name}:{card['name']}")
-        saved_count += 1
-    elif file_path_front is not None and file_path_rear is not None:
-        writefile(card['card_faces'][0]['image_uris']['large'],
-                  file_path_front)
-        print(f" saved {set_name}:{card['card_faces'][0]['name']}")
-        writefile(card['card_faces'][1]['image_uris']['large'], file_path_rear)
-        print(f" saved {set_name}:{card['card_faces'][1]['name']}")
         saved_count += 1
     else:
         print(f"No valid image found for card: {card['name']}")
@@ -310,7 +369,7 @@ def save_card_image(card):
     return saved_count, not_saved_count
 
 #
-# download_cards_list(list_name)
+# download_cards_list(output_dir, list_name, use_set_names)
 # download card images from a list of card names, sets and card numbers
 #
 # entries in the list should be formatted as:
@@ -321,7 +380,7 @@ def save_card_image(card):
 #  Soldier              Soldiers from all sets
 #  [MOE]                Card set MOE
 #
-def download_cards_list(list_name):
+def download_cards_list(output_dir, list_name, use_set_names=False):
     try:
         with open(list_name, "r") as file:
             card_list = file.readlines()  # Read the list of cards from a file
@@ -360,7 +419,8 @@ def download_cards_list(list_name):
             if len(card_number) > 0 and card_number.isalnum():
                 parameters['number'] = card_number
 
-        saved, not_saved = get_card_data_and_download(parameters)
+        saved, not_saved = get_card_data_and_download(output_dir, parameters, 
+            use_set_names=use_set_names)
         saved_count += saved
         not_saved_count += not_saved
 
@@ -374,10 +434,10 @@ def download_cards_list(list_name):
     return  saved_count, not_saved_count
 
 #
-# download_set(set_code)
+# download_set(output_dir, set_code, use_set_names)
 # download card images from a specific Magic: The Gathering set
 #
-def download_set(set_code):
+def download_set(output_dir, set_code, use_set_names=False):
     if not set_code:
         print("Invalid set code: None")
         return 0, 0  # no set code provided
@@ -386,20 +446,21 @@ def download_set(set_code):
         print("Invalid set code:", set_code)
         return 0, 0
 
-    return  get_card_data_and_download(f'set:{set_code}')
+    return  get_card_data_and_download(output_dir, f'set:{set_code}',
+                                       use_set_names=use_set_names)
 
 #
 # unit_test()
 # run unit tests for the downloader
 #
 def unit_test():
-    global output_dir, writefile
+    global write_file
     # Function to run unit tests for the script
     print("Running unit tests...")
     # set output directory for unit test
-    output_dir = os.path.join(os.getcwd(), "test")
+    output_dir = os.path.join(os.getcwd(), "unit-test")
     # create the test directory
-    os.makedirs(output_dir, exist_ok=True)
+    makedirs(output_dir)
 
     # Test 1: get_valid_filename function
     errors = 0
@@ -413,43 +474,46 @@ def unit_test():
     if result != "Good-KindName5":
         print("Test 1.2 failed: get_valid_filename returned " + result)
         errors += 1
+    # end of test 1
     if errors == 0:
         print('Test 1 passed')
 
     # Test 2: save_card_image function
     errors = 0
-    # disable fetch URL in writefile
-    writefile_orig = writefile
-    writefile = lambda url, file_path: writefile_orig(None, file_path)
+    # disable fetch URL in write_file
+    write_file_orig = write_file
+    write_file = lambda url, file_path: write_file_orig(None, file_path)
 
     # Test 2.1: save land cards
     card = {
+        'set': 'UT2-1',
         'set_name': "Unit Test 2.1",
         'name': "Mountain",
         'image_uris': {'large': 'https://api.scryfall.com/cards/300/large.jpg'}
     }
-    # writefile("http://127.0.0.1/image.jpg", os.path.join(output_dir, "image.jpg"))
-    save_card_image(card)
+    # write_file("http://127.0.0.1/image.jpg", os.path.join(output_dir, "image.jpg"))
+    save_card_image(output_dir, card, True)
     if not os.path.isfile(os.path.join(output_dir, card['set_name'], card['name'] + ".full.jpg")):
         print("Test 2.1 failed: save_card_image did not save Mountain")
         errors += 1
     card['name'] = "Island"
-    save_card_image(card)
+    save_card_image(output_dir, card, True)
     if not os.path.isfile(os.path.join(output_dir, card['set_name'], card['name'] + ".full.jpg")):
         print("Test 2.1 failed: save_card_image did not save Island")
         errors += 1
     
     # Test 2.2: save the same land card, renaming subsequent images
     card = {
+        'set': 'UT2-2',
         'set_name': "Unit Test 2.2",
         'name': "Island",
         'image_uris': {'large': 'https://api.scryfall.com/cards/300/large.jpg'}
     }
-    save_card_image(card)
+    save_card_image(output_dir, card, True)
     if not os.path.isfile(os.path.join(output_dir, card['set_name'], card['name'] + ".full.jpg")):
         print("Test 2.2 failed: save_card_image did not save Island")
         errors += 1
-    save_card_image(card)
+    save_card_image(output_dir, card, True)
     if os.path.isfile(os.path.join(output_dir, card['set_name'], card['name'] + ".full.jpg")):
         print("Test 2.2 failed: save_card_image did not rename Island to Island1")
         errors += 1
@@ -459,23 +523,24 @@ def unit_test():
     if not os.path.isfile(os.path.join(output_dir, card['set_name'], card['name'] + "2.full.jpg")):
         print("Test 2.2 failed: save_card_image did not save Island2")
         errors += 1
-    save_card_image(card)
+    save_card_image(output_dir, card, True)
     if not os.path.isfile(os.path.join(output_dir, card['set_name'], card['name'] + "3.full.jpg")):
         print("Test 2.2 failed: save_card_image did not save Island3")
         errors += 1
 
     # Test 2.3: save multiple sets
     card = {
+        'set': 'UT2-3',
         'set_name': "Unit Test 2.3.1",
         'name': "Plains",
         'image_uris': {'large': 'https://api.scryfall.com/cards/300/large.jpg'}
     }
-    save_card_image(card)
+    save_card_image(output_dir, card, True)
     if not os.path.isfile(os.path.join(output_dir, card['set_name'], card['name'] + ".full.jpg")):
         print("Test 2.3.1 failed: save_card_image did not save properly")
         errors += 1
     card['set_name'] = "Unit Test 2.3.2"
-    save_card_image(card)
+    save_card_image(output_dir, card, True)
     if not os.path.isfile(os.path.join(output_dir, card['set_name'], card['name'] + ".full.jpg")):
         print("Test 2.3.2 failed: save_card_image did not save properly")
         errors += 1
@@ -483,31 +548,106 @@ def unit_test():
         print("Test 2.3.2 failed: errant renaming of file")
         errors += 1
     card['set_name'] = "Unit Test 2.3.3"
-    save_card_image(card)
+    save_card_image(output_dir, card, True)
     if not os.path.isfile(os.path.join(output_dir, card['set_name'], card['name'] + ".full.jpg")):
         print("Test 2.3.3 failed: save_card_image did not save properly")
         errors += 1
+    # end of test 2
     if errors == 0:
         print("Test 2 passed")
 
-    # Test 3: save card with multiple faces
+    # Test 3: save cards with multiple faces
     errors = 0
     card = {
+        'set': 'UT3',
         'set_name': "Unit Test 3",
         'name': "Red Bandit // Crimson Zombie",
-        'layout': "reversible_card",
+        'layout': "transform",
         'card_faces': (
             {'name': 'Red Bandit', 'image_uris': {'large': 'https://api.scryfall.com/cards/300/large_front.jpg'}},
             {'name': 'Crimson Zombie', 'image_uris': {'large': 'https://api.scryfall.com/cards/300/large_front.jpg'}}
         )
     }
-    save_card_image(card)
-    if not os.path.isfile(os.path.join(output_dir, card['set_name'], card['card_faces'][0]['name'] + " front.full.jpg")):
-        print("Test 3 failed: save_card_image did not save front of Two-Faced Card")
+    save_card_image(output_dir, card, False)
+    if not os.path.isfile(os.path.join(output_dir, card['set'], card['card_faces'][0]['name'] + ".full.jpg")):
+        print("Test 3.1.1 failed: save_card_image did not save front of transform card")
         errors += 1
-    if not os.path.isfile(os.path.join(output_dir, card['set_name'], card['card_faces'][0]['name'] + " rear.full.jpg")):
-        print("Test 3 failed: save_card_image did not save rear of Two-Faced Card")
+    if not os.path.isfile(os.path.join(output_dir, card['set'], card['card_faces'][1]['name'] + ".full.jpg")):
+        print("Test 3.1.1 failed: save_card_image did not save rear of transform card")
         errors += 1
+    # test with duplicate
+    save_card_image(output_dir, card, False)
+    if not os.path.isfile(os.path.join(output_dir, card['set'], card['card_faces'][0]['name'] + "2.full.jpg")):
+        print("Test 3.1.2 failed: save_card_image did not save front of transform card 2")
+        errors += 1
+    if not os.path.isfile(os.path.join(output_dir, card['set'], card['card_faces'][1]['name'] + "2.full.jpg")):
+        print("Test 3.1.2 failed: save_card_image did not save rear of transform card 2")
+        errors += 1
+    if not os.path.isfile(os.path.join(output_dir, card['set'], card['card_faces'][0]['name'] + "1.full.jpg")):
+        print("Test 3.1.2 failed: save_card_image did not rename front of transform card 1")
+        errors += 1
+    if not os.path.isfile(os.path.join(output_dir, card['set'], card['card_faces'][1]['name'] + "1.full.jpg")):
+        print("Test 3.1.2 failed: save_card_image did not rename rear of transform card 1")
+        errors += 1
+    # reversible cards
+    card = {
+        'set': 'UT3',
+        'set_name': "Unit Test 3",
+        'name': "Blue Bird // Blue Bird",
+        'layout': "reversible_card",
+        'card_faces': (
+            {'name': 'Blue Bird', 'image_uris': {'large': 'https://api.scryfall.com/cards/300/large_front.jpg'}},
+            {'name': 'Blue Bird', 'image_uris': {'large': 'https://api.scryfall.com/cards/300/large_front.jpg'}}
+        )
+    }
+    save_card_image(output_dir, card, False)
+    if not os.path.isfile(os.path.join(output_dir, card['set'], card['card_faces'][0]['name'] + ".full.jpg")):
+        print("Test 3.2 failed: save_card_image did not save front of reversible")
+        errors += 1
+    if not os.path.isfile(os.path.join(output_dir, card['set'], card['card_faces'][1]['name'] + "-bk.full.jpg")):
+        print("Test 3.2 failed: save_card_image did not save rear of reversible")
+        errors += 1
+    # adventure card
+    card = {
+        'set': 'UT3',
+        'set_name': "Unit Test 3",
+        'name': "George of the Jungle // Banana Tally",
+        'layout': "adventure",
+        'image_uris': {'large': 'https://api.scryfall.com/cards/300/large.jpg'},
+        'card_faces': (
+            {'name': 'George of the Jungle'}, #, 'image_uris': {'large': 'https://api.scryfall.com/cards/300/large_front.jpg'}},
+            {'name': 'Banana Tally'}  #, 'image_uris': {'large': 'https://api.scryfall.com/cards/300/large_front.jpg'}}
+        )
+    }
+    save_card_image(output_dir, card, False)
+    if not os.path.isfile(os.path.join(output_dir, card['set'], 
+                                       card['card_faces'][0]['name'] + ".full.jpg")):
+        print("Test 3.3 failed: save_card_image did not save adventure card")
+        errors += 1
+    if os.path.isfile(os.path.join(output_dir, card['set'], card['card_faces'][1]['name'] + ".full.jpg")):
+        print("Test 3.3 failed: save_card_image saved second face of adventure card")
+        errors += 1
+    # split card
+    card = {
+        'set': 'UT3',
+        'set_name': "Unit Test 3",
+        'name': "Python // Java",
+        'layout': "split",
+        'image_uris': {'large': 'https://api.scryfall.com/cards/300/large.jpg'},
+        'card_faces': (
+            {'name': 'Python'}, #, 'image_uris': {'large': 'https://api.scryfall.com/cards/300/large_front.jpg'}},
+            {'name': 'Java'}  #, 'image_uris': {'large': 'https://api.scryfall.com/cards/300/large_front.jpg'}}
+        )
+    }
+    save_card_image(output_dir, card, False)
+    if not os.path.isfile(os.path.join(output_dir, card['set'], 
+                                       card['card_faces'][0]['name'] + card['card_faces'][1]['name'] + ".full.jpg")):
+        print("Test 3.4 failed: save_card_image did not save adventure card")
+        errors += 1
+    if os.path.isfile(os.path.join(output_dir, card['set'], card['card_faces'][1]['name'] + ".full.jpg")):
+        print("Test 3.4 failed: save_card_image saved second face of adventure card")
+        errors += 1
+    # end of Test 3
     if errors == 0:
         print("Test 3 passed")
     
@@ -521,7 +661,7 @@ def unit_test():
     if magic_set:
         print("Test 4.2 failed: bogus set found")
         errors += 1
-
+    # end of test 4
     if errors == 0:
         print("Test 4 passed")
     print("Unit test complete")
@@ -534,9 +674,15 @@ if __name__ == "__main__":
         unit_test()
         exit(0)  # Exit after running unit tests
 
-    output_dir = os.path.join(os.getcwd(), "art") # write card images to output_dir
-    os.makedirs(output_dir, exist_ok=True)
-    print("Writing files in", output_dir, '\n')
+    # parse command line arguments
+    args = arg_parser.parse_args()
+    
+    # write card images to an output directory
+    output_directory = args.output_directory
+    if not os.path.isabs(args.output_directory):
+        output_directory = os.path.join(os.getcwd(), args.output_directory)
+    makedirs(output_directory)
+    print("Writing files in", output_directory, '\n')
 
     option = None
     # prompt the user to select an option
@@ -555,20 +701,23 @@ Select: ")
         # prompt the user to enter the set code
         set_code = input("Enter the set code (e.g., 'inv'): ")
         start = datetime.datetime.now()
-        (saved, not_saved) = download_set(set_code)
+        (saved, not_saved) = download_set(output_directory, set_code, 
+                                          args.set_names)
     elif option == '2':
         # Download cards from a list
         # prompt the user to enter the name of the card list
         list_name = input("Enter the name of the card list file: ").strip()
         start = datetime.datetime.now()
-        (saved, not_saved) = download_cards_list(list_name)
+        (saved, not_saved) = download_cards_list(output_directory, list_name,
+                                                 args.set_names)
     elif option == '3':
         # Download a Scryfall query
         print("Queries are key-value pairs like name:Mountain set:bng")
         # prompt the user to enter the query
         query = input("Query: ")
         start = datetime.datetime.now()
-        (saved, not_saved) = get_card_data_and_download(query, confirm=True)
+        (saved, not_saved) = get_card_data_and_download(output_directory, query,
+            confirm=True, use_set_names=args.set_names)
         if saved == 0 and not_saved == 0:
             print("No cards found")
     else:
