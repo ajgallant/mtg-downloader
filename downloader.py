@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# $Id: downloader.py 298 2025-08-01 01:21:47Z drew $
+# $Id: downloader.py 299 2025-08-01 14:41:06Z drew $
 #
 # git repository
 #  https://github.com/ajgallant/mtg-downloader.git
@@ -37,6 +37,7 @@ description = "Magic: The Gathering card image downloader"
 #    set query parameter:    set:eek
 #    token query parameter:  is:token
 #
+# Command line options:
 import argparse
 arg_parser = argparse.ArgumentParser(description=description, 
     formatter_class=argparse.RawTextHelpFormatter)
@@ -52,14 +53,12 @@ arg_parser.add_argument('-o', '--output-directory', action='store',
 
 import os
 import re
+import urllib
 import datetime
 import json
 from functools import lru_cache
-#import ijson
 import requests
-import urllib3
-import urllib.request
-import PIL
+# import urllib3  # useful for HTTP requests
 from PIL import Image
 from ratelimit import limits, sleep_and_retry
 # ratelimit sleep_and_retry is best used by a single thread.  conditions and
@@ -67,7 +66,7 @@ from ratelimit import limits, sleep_and_retry
 # in turn.
 
 # Disable SSL verification warning
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+# urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 #
 # get_request_limited(*args, **kwargs)
@@ -84,17 +83,18 @@ def get_request_limited(*args, **kwargs):
 # makedirs(path, exist_ok)
 # wrapper of os.makedirs() to reduce redundant calls
 #
-@lru_cache(24)
+@lru_cache(256)
 def makedirs(path, exist_ok=True):
     return  os.makedirs(path, exist_ok=exist_ok)
 
 #
+# get_valid_filename(name)
+# converts a string to a valid filename.
+#    
+# Removes characters that are not alphanumeric or in a list of
+# accepted punctuation.
+#
 def get_valid_filename(name):
-    """Converts a string to a valid filename.
-    
-    Removes characters that are not alphanumeric or in a list of
-    accepted punctuation.
-    """
     filename = str(name).strip()
     # Perform substitutions
     filename = filename.replace(' // ', '')
@@ -165,12 +165,12 @@ def write_file(url, file_path):
         return  file.write(req.content)
 
 #
-# check_set_exists(set_code)
-# check if a Magic: The Gathering set exists based on its set code
+# find_set(set_code)
+# Find a Magic: The Gathering set of cards matching set code
 #
 # returns a set or None
 #
-def check_set_exists(set_code):
+def find_set(set_code):
     url = f"https://api.scryfall.com/sets/{set_code}"
     try:
         response = get_request_limited(url)
@@ -189,14 +189,19 @@ def check_set_exists(set_code):
 #
 # bulk data files may be very large, in excess of 1GB
 #
-# return a download URL for the card JSON
+# returns  URL for the JSON of all MTG cards
 #
 def get_all_cards_url():
     res = get_request_limited('https://api.scryfall.com/bulk-data')
     content = res.json()
     # response contains URIs for card images, JSON, sets, etc.
-    # confirm *type* of bulk data before downloading
-    return content['data'][3]['download_uri']
+    all_cards_uri = None
+    for bulk_data in content['data']:
+        # confirm type of bulk data
+        if bulk_data['type'] == 'all_cards':
+            all_cards_uri = bulk_data['download_uri']
+            break
+    return  all_cards_uri
 
 #
 # get_card_data_and_download(output_dir, query_parts, confirm, use_set_names)
@@ -207,7 +212,9 @@ def get_all_cards_url():
 #  {"name": "Mountain", "set": "inv"}
 # confirm is a boolean; if True, confirm query results before downloading
 #
-# apply a rate limit to this function as it may be called frequently
+# apply a rate limit to API requests in this function
+# use asynchronous IO to download card json and images faster
+#
 def get_card_data_and_download(output_dir, query_parts, confirm=False, 
                                use_set_names=False):
     if not isinstance(query_parts, str):
@@ -255,9 +262,8 @@ def get_card_data_and_download(output_dir, query_parts, confirm=False,
                     if item >= 10:
                         print(' ...')
                         break
-                    set_name = card['set'].upper()
-                    if use_set_names:
-                        set_name = card['set_name']
+                    set_name = card['set'].upper() if not use_set_names \
+                        else card['set_name']
                     print(' {set_name}:{name}'.format(set_name=set_name,
                                                       name=card['name']))
                     item += 1
@@ -291,9 +297,10 @@ def get_card_data_and_download(output_dir, query_parts, confirm=False,
 # download the card image and store with a unique filename
 #
 def save_card_image(output_dir, card, use_set_names=False):
-    set_name = get_valid_filename(card['set'].upper())  # set code
+    set_name = get_valid_filename(card['set'].upper())
     if use_set_names:
         set_name = get_valid_filename(card['set_name'])
+    # initialize output directory for set
     dir_path = os.path.join(output_dir, set_name)
     makedirs(dir_path)
 
@@ -317,7 +324,7 @@ def save_card_image(output_dir, card, use_set_names=False):
     saved_count = 0
     not_saved_count = 0
 
-    # download the card image and save it
+    # download and store the card images
     if 'card_faces' in card and len(card['card_faces']) > 0:
         if 'layout' in card and card['layout'] == 'adventure':
             # adventure cards have an alternate name: card_faces[0]
@@ -651,13 +658,13 @@ def unit_test():
     if errors == 0:
         print("Test 3 passed")
     
-    # Test 4: check_set_exists
+    # Test 4: find sets
     errors = 0
-    magic_set = check_set_exists('inv')
+    magic_set = find_set('inv')
     if not magic_set or magic_set['code'] != 'inv':
         print("Test 4.1 failed: Invasion set not found")
         errors += 1
-    magic_set = check_set_exists('vito')
+    magic_set = find_set('vito')
     if magic_set:
         print("Test 4.2 failed: bogus set found")
         errors += 1
@@ -695,7 +702,7 @@ if __name__ == "__main__":
  3. Scryfall query\n\
 Select: ")
 
-    print() # '\n'
+    print(end='\n')
     if option == '1':
         # Download a set
         # prompt the user to enter the set code
@@ -728,5 +735,5 @@ Select: ")
     print(f"\nTotal cards saved:     {saved}")
     print(f"Total cards not saved: {not_saved}")
 
-    elapsed_time = end - start  # Calculate the elapsed time
+    elapsed_time = end - start  # Calculate the elapsed time of transfer
     print("Elapsed time:", elapsed_time)

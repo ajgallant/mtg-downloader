@@ -12,7 +12,7 @@ For more advanced card selection, the user may download the results of a [Scryfa
 
 ## Prerequisites
 
-Before using the scripts, make sure you have [Python](https://www.python.org/downloads/) (version 3.8+) installed on your system.
+Before using the scripts, make sure you have [Python](https://www.python.org/downloads/) version 3.11 and git installed on your system.
 
 ## Usage
 
@@ -36,7 +36,9 @@ Before using the scripts, make sure you have [Python](https://www.python.org/dow
 
 4. Run the desired script.<p>
 
-   For **downloading card images**, start the downloader script:
+   #### Download Card Images
+   
+   Start the downloader script:
 	
 	``downloader.py``
 	
@@ -72,7 +74,9 @@ Before using the scripts, make sure you have [Python](https://www.python.org/dow
 	 
 	 Upon conclusion of the download, the card images may be found in the `art` directory.
 
-    For **generating Binder**:
+    #### Generate Binder
+    
+    Execute the Binder script:
 
      ``python Binder_Generator.py``
      
@@ -94,12 +98,12 @@ Before using the scripts, make sure you have [Python](https://www.python.org/dow
 
 ## Future Enhancements
 
-- Select the image size and quality from the small, normal, and large image URIs.
+- Select the image size and quality from three URIs: small, normal, and large.
 - Asynchronous transfer of images and search results.
-- Short or long set name may be used for the card image directory name.
+- Initialize the ``mtg-downloader`` Python module and define interface v1.
 
 ## Note
 
-- Make sure to comply with the terms of use of the Scryfall API and the API usage policies when using the scripts.
+- Make sure to comply with the terms of use of the Scryfall API and the API usage policies.
 - The proper functioning of the scripts relies on the availability of the Scryfall API. Ensure that the API is accessible and operational before running the scripts.
 - These scripts are provided "as is" without any warranty. The author assumes no responsibility for any damages arising from the use of these scripts.
