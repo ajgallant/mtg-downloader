@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# $Id: downloader.py 299 2025-08-01 14:41:06Z drew $
+# $Id: downloader.py 300 2025-08-02 15:17:38Z drew $
 #
 # git repository
 #  https://github.com/ajgallant/mtg-downloader.git
@@ -21,11 +21,13 @@ description = "Magic: The Gathering card image downloader"
 # The list of cards can be specified in a text file, where each line follows
 # the format:
 #
-#  <card_name> [<set>] <card number>
+#  <card_name> [<set>] <card number>  # comment
+#  <card_name> (<set>) <card number>
 #
 # examples:
+#  # Elven Wars deck 1.4
 #  Mountain [ltr] 300    Mountain from set LTR, card number 300
-#  Island [ltr]          Islands from set LTR
+#  Island (ltr)          Islands from set LTR
 #  Soldier               Soldiers from all sets
 #  [MOE]                 Card set MOE
 #
@@ -403,13 +405,17 @@ def download_cards_list(output_dir, list_name, use_set_names=False):
 
     # an entry in the list may select multiple cards
     for entry in card_list:
+        # truncate at comment
+        comment_index = entry.find('#')
+        if comment_index >= 0:
+            entry = entry[:comment_index]
         entry = entry.strip()  # remove leading and trailing whitespace
-        if len(entry) < 2 or entry[0] == '#':
-            # skip empty lines and comments
+        # skip empty lines
+        if len(entry) < 1:
             continue
 
         # find set code in brackets
-        set_code_match = re.search(r'(\[)(.+)(\])', entry)
+        set_code_match = re.search(r'(\[|\()(.+)(\]|\))', entry)
 
         if not set_code_match:
             # only a card name, no set code
@@ -671,6 +677,30 @@ def unit_test():
     # end of test 4
     if errors == 0:
         print("Test 4 passed")
+
+    # Test 5: Download cards from lists/long.txt
+    errors = 0
+    list_path = os.path.join("lists", "long.txt")
+    
+    # skip test if list file doesn't exist
+    prev_dir = output_dir
+    output_dir = os.path.join(output_dir, 'Unit Test 5')
+    if not os.path.exists(list_path):
+        print(f"Test 5 aborted: card list {list_path} not found")
+        errors += 1
+    else:
+        # calculate expected results from download
+        expected = (16, 5)  # saved, not_saved
+        # download cards
+        result = download_cards_list(output_dir, list_path)
+        if expected != result:  # recursive equality for tuples - wow
+            print('Test 5: result {0} did not match expected {1}'.format(result, expected))
+            errors += 1
+    output_dir = prev_dir
+    # end of test 5
+    if errors == 0:
+        print("Test 5 passed")
+
     print("Unit test complete")
 
 # begin main script

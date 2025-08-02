@@ -52,7 +52,7 @@ Before using the scripts, make sure you have [Python](https://www.python.org/dow
 	
 	 <p>
 	 - *CardName* the name of the card, without any additional spaces.
-	 - *SetCode* the set code, enclosed in brackets.
+	 - *SetCode* the set code, enclosed in brackets or parens.
 	 - *CardNumber* the card number within the set.
 
     For example, the "cards.txt" file could be structured:
@@ -61,9 +61,9 @@ Before using the scripts, make sure you have [Python](https://www.python.org/dow
 	 ```
 	 # Cards for the Competition 2022 deck
     Black Lotus   [UNL]   1
-    Force of Will [ALL]
+    Force of Will (ALL)
     Brainstorm
-    [iko]
+    (iko)
     [ALL] 17
      ```
 
@@ -100,7 +100,8 @@ Before using the scripts, make sure you have [Python](https://www.python.org/dow
 
 - Select the image size and quality from three URIs: small, normal, and large.
 - Asynchronous transfer of images and search results.
-- Initialize the ``mtg-downloader`` Python module and define interface v1.
+- Support a tokenized file name format specified in a configuration file.
+- Publish v1.0 of the ``mtg-downloader`` Python module and define a public interface + classes.  Exported functions could be renamed, annotated ##Exported## and use additional parameters.
 
 ## Note
 
